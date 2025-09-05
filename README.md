@@ -7,7 +7,7 @@ This guide explains how to set up and use the LD19 LiDAR with the Jetson Orin Na
 ### Pin Connections
 Connect the LD19 LiDAR to the Jetson's 40-pin header as follows:
 
-##Prerequisites
+### Prerequisites
 - Jetson Orin Nano
 - LD19 LiDAR
 - installed ROS2 Humble on Jetson Orin Nano [ROS2 Humble Installation Guide](https://nvidia-isaac-ros.github.io/getting_started/isaac_apt_repository.html)
