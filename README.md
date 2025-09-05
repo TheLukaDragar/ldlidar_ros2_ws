@@ -9,6 +9,8 @@ Connect the LD19 LiDAR to the Jetson's 40-pin header as follows:
 
 ![Wiring Diagram](wiring.jpg)
 
+![Foxglove Studio](foxglove.png)
+
 1. **LiDAR TX (Pin 1) READ FROM LEFT TO RIGHT** → **Jetson Pin 10 (UART1_RXD)**
    - This is the data output from LiDAR (3.3V logic level)
    - Transmits data at 230400 baud rate
