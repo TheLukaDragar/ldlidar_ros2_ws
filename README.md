@@ -40,6 +40,14 @@ Connect the LD19 LiDAR to the Jetson's 40-pin header as follows:
    - Power supply (4.5V-5.5V)
    - The Jetson's 5V pin can supply up to 1A
 
+| LiDAR Pin | Jetson Pin | Description |
+|-----------|------------|-------------|
+| 1 (TX) | 10 (UART1_RXD) | Data output from LiDAR (3.3V logic), 230400 baud rate |
+| 2 (PWM) | Disconnected / GND | Disconnected: uses default speed; Connected to GND: fixed speed |
+| 3 (GND) | Any GND (6, 9, 14, 20, 25, 30, 34, 39) | Ground connection. Use most convenient pin. |
+| 4 (5V) | 2 (5V) | Power supply (4.5V-5.5V). Jetson 5V pin supplies up to 1A. |
+
+
 ### Pin Identification
 When holding the LiDAR with the circular part facing upwards, the pins are numbered from left to right (1-4).
 

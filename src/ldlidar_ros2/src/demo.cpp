@@ -51,7 +51,7 @@ int main(int argc, char **argv) {
 
   // Initialize default settings
   LaserScanSetting setting;
-  setting.frame_id = "base_laser";
+  setting.frame_id = "ld19_frame";
   setting.laser_scan_dir = true;
   setting.enable_angle_crop_func = false;
   setting.angle_crop_min = 135.0;

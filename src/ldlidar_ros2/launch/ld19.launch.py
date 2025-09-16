@@ -32,7 +32,7 @@ def generate_launch_description():
         {'product_name': 'LDLiDAR_LD19'},
         {'laser_scan_topic_name': 'scan'},
         {'point_cloud_2d_topic_name': 'pointcloud2d'},
-        {'frame_id': 'base_laser'},
+        {'frame_id': 'ld19_frame'},
         {'port_name': '/dev/ttyTHS1'},
         {'serial_baudrate': 230400},
         {'laser_scan_dir': True},
@@ -49,7 +49,7 @@ def generate_launch_description():
     package='tf2_ros',
     executable='static_transform_publisher',
     name='base_link_to_base_laser_ld19',
-    arguments=['0','0','0.18','0','0','0','base_link','base_laser']
+    arguments=['0','0','0.18','0','0','0','base_link','ld19_frame']
   )
 
 
