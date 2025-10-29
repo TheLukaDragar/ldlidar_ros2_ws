@@ -22,7 +22,7 @@ git submodule update --init --recursive
 ``` bash
 cd ~/ldlidar_ros2_ws
 
-sudo chmod 777 /dev/ttyUSB0
+sudo chmod 777 /dev/ttyUSB1
 ```
 - Modify the `port_name` value in the Lanuch file corresponding to the radar product model under `launch/`, using `ld14.launch.py` as an example, as shown below.
 

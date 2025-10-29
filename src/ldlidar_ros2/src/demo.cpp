@@ -26,8 +26,10 @@
 #include <thread>
 #include <rclcpp/executors/multi_threaded_executor.hpp>
 #include <sensor_msgs/point_cloud2_iterator.hpp>
+#include <fstream>
 
 uint64_t GetTimestamp(void);
+
 
 void  ToLaserscanMessagePublish(ldlidar::Points2D& src,  double lidar_spin_freq, LaserScanSetting& setting,
   rclcpp::Node::SharedPtr& node, rclcpp::Publisher<sensor_msgs::msg::LaserScan>::SharedPtr& lidarpub);
@@ -163,8 +165,8 @@ int main(int argc, char **argv) {
   RCLCPP_INFO(node->get_logger(), "<range_max>: %f", setting.range_max);
 
   if (port_name.empty()) {
-    RCLCPP_ERROR(node->get_logger(), "fail, port_name is empty!");
-    exit(EXIT_FAILURE);
+    RCLCPP_ERROR(node->get_logger(), "fail, port_name is empty! Will keep trying...");
+    // Don't exit - keep the node alive and try again
   }
 
   ldlidar_drv->RegisterGetTimestampFunctional(std::bind(&GetTimestamp)); 
@@ -180,28 +182,29 @@ int main(int argc, char **argv) {
   } else if (!strcmp(product_name.c_str(),"LDLiDAR_LD19")) {
     lidartypename = ldlidar::LDType::LD_19;
   } else {
-    RCLCPP_ERROR(node->get_logger(),"Error, input param <product_name> is fail!!");
-    exit(EXIT_FAILURE);
+    RCLCPP_ERROR(node->get_logger(),"Error, input param <product_name> is fail!! Will keep trying...");
+    // Don't exit - keep the node alive and try again
   }
 
   if (ldlidar_drv->Connect(lidartypename, port_name, serial_baudrate)) {
     RCLCPP_INFO(node->get_logger(), "ldlidar serial connect is success");
   } else {
-    RCLCPP_ERROR(node->get_logger(), "ldlidar serial connect is fail");
-    exit(EXIT_FAILURE);
+    RCLCPP_ERROR(node->get_logger(), "ldlidar serial connect is fail - will keep trying to reconnect");
+    // Don't exit - will retry in main loop
   }
 
   if (ldlidar_drv->WaitLidarComm(3500)) {
     RCLCPP_INFO(node->get_logger(), "ldlidar communication is normal.");
   } else {
-    RCLCPP_ERROR(node->get_logger(), "ldlidar communication is abnormal.");
-    exit(EXIT_FAILURE);
+    RCLCPP_ERROR(node->get_logger(), "ldlidar communication is abnormal - will keep trying to reconnect");
+    // Don't exit - will retry in main loop
   }
 
   if (ldlidar_drv->Start()) {
     RCLCPP_INFO(node->get_logger(), "ldlidar driver start is success.");
   } else {
-    RCLCPP_ERROR(node->get_logger(), "ldlidar driver start is fail.");
+    RCLCPP_ERROR(node->get_logger(), "ldlidar driver start is fail - will keep trying to reconnect");
+    // Don't exit - will retry in main loop
   }
 
   // create ldlidar data topic and publisher
@@ -219,29 +222,134 @@ int main(int argc, char **argv) {
   rclcpp::WallRate r(10); //Hz
 
   ldlidar::Points2D laser_scan_points;
+  
+  // Add reconnection variables
+  int timeout_count = 0;
+  const int max_timeout_count = 5; // 0.5 seconds at 10Hz - much faster reconnection
+  bool needs_reconnection = false;
+  bool initial_connection_failed = false;
 
   RCLCPP_INFO(node->get_logger(), "start normal, pub lidar data");
 
-  while (rclcpp::ok() && 
-    ldlidar::LDLidarDriver::Ok()) {
+  // Check if initial connection failed and trigger reconnection
+  if (port_name.empty() || 
+      !ldlidar_drv->Connect(lidartypename, port_name, serial_baudrate) ||
+      !ldlidar_drv->WaitLidarComm(3500) ||
+      !ldlidar_drv->Start()) {
+    RCLCPP_WARN(node->get_logger(), "Initial connection failed, will retry in main loop");
+    initial_connection_failed = true;
+    needs_reconnection = true;
+  }
+
+  while (rclcpp::ok()) {
   
-    switch (ldlidar_drv->GetLaserScanData(laser_scan_points, 1500)){
-      case ldlidar::LidarStatus::NORMAL: {
-        double lidar_scan_freq = 0;
-        ldlidar_drv->GetLidarScanFreq(lidar_scan_freq);
-        ToLaserscanMessagePublish(laser_scan_points, lidar_scan_freq, setting, node, lidar_pub_laserscan);
-        ToSensorPointCloudMessagePublish(laser_scan_points, setting, node, lidar_pub_pointcloud);
-        break;
+    // Add simple check for driver validity before accessing data
+    if (ldlidar_drv == nullptr) {
+      RCLCPP_ERROR(node->get_logger(), "Driver is null, will keep trying to reconnect");
+      needs_reconnection = true;
+    } else if (!needs_reconnection && !initial_connection_failed) {
+      // Only try to get data if we're not in reconnection mode
+      // Add try-catch to handle reconnect crashes
+      try {
+        switch (ldlidar_drv->GetLaserScanData(laser_scan_points, 1500)){
+          case ldlidar::LidarStatus::NORMAL: {
+            // Reset timeout counter on successful data
+            timeout_count = 0;
+            initial_connection_failed = false; // Reset initial failure flag
+            
+            // Add simple data validation
+            if (laser_scan_points.empty()) {
+              RCLCPP_WARN(node->get_logger(), "Empty laser scan data received, skipping");
+              break;
+            }
+            
+            double lidar_scan_freq = 0;
+            ldlidar_drv->GetLidarScanFreq(lidar_scan_freq);
+            ToLaserscanMessagePublish(laser_scan_points, lidar_scan_freq, setting, node, lidar_pub_laserscan);
+            ToSensorPointCloudMessagePublish(laser_scan_points, setting, node, lidar_pub_pointcloud);
+            break;
+          }
+          case ldlidar::LidarStatus::DATA_TIME_OUT: {
+            timeout_count++;
+            RCLCPP_WARN(node->get_logger(), "ldlidar point cloud data publish time out (%d/%d), checking connection...", 
+                       timeout_count, max_timeout_count);
+            
+            if (timeout_count >= max_timeout_count) {
+              RCLCPP_ERROR(node->get_logger(), "Too many timeouts, attempting reconnection...");
+              needs_reconnection = true;
+              timeout_count = 0;
+            }
+            break;
+          }
+          case ldlidar::LidarStatus::DATA_WAIT: {
+            break;
+          }
+          default:
+            break;
+        }
+      } catch (const std::exception& e) {
+        RCLCPP_ERROR(node->get_logger(), "Exception in main loop (likely USB reconnect issue): %s", e.what());
+        needs_reconnection = true;
+        // Add small delay to prevent rapid error loops
+        rclcpp::sleep_for(std::chrono::milliseconds(100));
+      } catch (...) {
+        RCLCPP_ERROR(node->get_logger(), "Unknown exception in main loop (likely USB reconnect issue)");
+        needs_reconnection = true;
+        // Add small delay to prevent rapid error loops
+        rclcpp::sleep_for(std::chrono::milliseconds(100));
       }
-      case ldlidar::LidarStatus::DATA_TIME_OUT: {
-        RCLCPP_ERROR(node->get_logger(), "ldlidar point cloud data publish time out, please check your lidar device.");
-        break;
+    }
+    
+    // Handle reconnection if needed
+    if (needs_reconnection) {
+      static int reconnect_attempts = 0;
+      reconnect_attempts++;
+      
+      RCLCPP_INFO(node->get_logger(), "Attempting to reconnect to LiDAR (attempt %d)...", reconnect_attempts);
+      
+      // Stop and disconnect current driver
+      ldlidar_drv->Stop();
+      ldlidar_drv->Disconnect();
+      
+      // Wait shorter for USB to stabilize - faster reconnection
+      rclcpp::sleep_for(std::chrono::milliseconds(500));
+      
+      // Check if the specified device exists
+      std::ifstream device_file(port_name);
+      if (!device_file.good()) {
+        RCLCPP_WARN(node->get_logger(), "Specified device %s not found, waiting for USB device...", port_name.c_str());
+        device_file.close();
+        rclcpp::sleep_for(std::chrono::milliseconds(200));
+        continue; // Skip this iteration and try again
       }
-      case ldlidar::LidarStatus::DATA_WAIT: {
-        break;
+      device_file.close();
+      
+      // Try to reconnect using ONLY the specified device
+      if (ldlidar_drv->Connect(lidartypename, port_name, serial_baudrate)) {
+        RCLCPP_INFO(node->get_logger(), "LiDAR reconnection successful");
+        
+        // Wait for communication to establish - faster timeout
+        if (ldlidar_drv->WaitLidarComm(1000)) {
+          RCLCPP_INFO(node->get_logger(), "LiDAR communication re-established");
+          
+          // Start the driver again
+          if (ldlidar_drv->Start()) {
+            RCLCPP_INFO(node->get_logger(), "LiDAR driver restarted successfully");
+            needs_reconnection = false;
+            timeout_count = 0;
+            reconnect_attempts = 0; // Reset attempt counter on success
+          } else {
+            RCLCPP_ERROR(node->get_logger(), "Failed to restart LiDAR driver, will retry...");
+          }
+        } else {
+          RCLCPP_ERROR(node->get_logger(), "LiDAR communication failed after reconnection, will retry...");
+        }
+      } else {
+        RCLCPP_ERROR(node->get_logger(), "LiDAR reconnection failed (attempt %d), will retry...", reconnect_attempts);
       }
-      default:
-        break;
+      
+      // Add shorter delay between reconnection attempts - faster retry
+      rclcpp::sleep_for(std::chrono::milliseconds(200));
     }
 
     r.sleep();
@@ -319,6 +427,13 @@ void  ToLaserscanMessagePublish(ldlidar::Points2D& src,  double lidar_spin_freq,
     output.ranges.assign(beam_size, std::numeric_limits<float>::quiet_NaN());
     output.intensities.assign(beam_size, std::numeric_limits<float>::quiet_NaN());
     for (auto point : src) {
+      // Add simple bounds checking to prevent crashes on corrupted data
+      if (point.distance < 0 || point.distance > 50000 || 
+          point.intensity < 0 || point.intensity > 1000 ||
+          point.angle < 0 || point.angle > 360) {
+        continue; // Skip invalid points that might cause crashes
+      }
+      
       float range = point.distance / 1000.f;  // distance unit transform to meters
       float intensity = point.intensity;      // laser receive intensity 
       float dir_angle = point.angle;
@@ -442,6 +557,18 @@ void ToSensorPointCloudMessagePublish(ldlidar::Points2D& src, LaserScanSetting& 
   sensor_msgs::PointCloud2Iterator<float> iter_intensity(output, "intensity");
 
   for (int i = 0; i < frame_points_num; ++i, ++iter_x, ++iter_y, ++iter_z, ++iter_intensity) {
+    // Add simple bounds checking to prevent crashes on corrupted data
+    if (dst[i].distance < 0 || dst[i].distance > 50000 || 
+        dst[i].intensity < 0 || dst[i].intensity > 1000 ||
+        dst[i].angle < 0 || dst[i].angle > 360) {
+      // Set invalid points to NaN instead of crashing
+      *iter_x = std::numeric_limits<float>::quiet_NaN();
+      *iter_y = std::numeric_limits<float>::quiet_NaN();
+      *iter_z = std::numeric_limits<float>::quiet_NaN();
+      *iter_intensity = std::numeric_limits<float>::quiet_NaN();
+      continue;
+    }
+    
     float range = dst[i].distance / 1000.f;  // distance unit transform to meters
     float dir_angle = ANGLE_TO_RADIAN(dst[i].angle);
     

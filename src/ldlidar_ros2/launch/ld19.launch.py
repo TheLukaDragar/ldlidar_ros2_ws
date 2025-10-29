@@ -33,7 +33,7 @@ def generate_launch_description():
         {'laser_scan_topic_name': 'scan'},
         {'point_cloud_2d_topic_name': 'pointcloud2d'},
         {'frame_id': 'ld19_frame'},
-        {'port_name': '/dev/ttyTHS1'},
+        {'port_name': '/dev/ttyFTDI_B'},  # Try different FT4232H port
         {'serial_baudrate': 230400},
         {'laser_scan_dir': True},
         {'enable_angle_crop_func': False},
@@ -44,19 +44,20 @@ def generate_launch_description():
       ]
   )
 
-  # base_link to base_laser tf node
-  base_link_to_laser_tf_node = Node(
-    package='tf2_ros',
-    executable='static_transform_publisher',
-    name='base_link_to_base_laser_ld19',
-    arguments=['0','0','0.18','0','0','0','base_link','ld19_frame']
-  )
+  # # base_link to base_laser tf node
+  # base_link_to_laser_tf_node = Node(
+  #   package='tf2_ros',
+  #   executable='static_transform_publisher',
+  #   name='base_link_to_base_laser_ld19',
+  #   arguments=['0','0','0.05','3.14159','0','0','px4_body','ld19_frame']
+
+  # )
 
 
   # Define LaunchDescription variable
   ld = LaunchDescription()
 
   ld.add_action(ldlidar_node)
-  ld.add_action(base_link_to_laser_tf_node)
+  #ld.add_action(base_link_to_laser_tf_node)
 
   return ld
